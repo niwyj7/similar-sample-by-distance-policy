@@ -1,308 +1,240 @@
-import pandas as pd
-import numpy as np
+
 import os
 import sys
-from functools import lru_cache
-# import your dataloader
-# ed = EnergyDataLoader('lcation')
-# esql = EnergySQL("location", "location_Weather")
+import numpy as np
+import pandas as pd
+from sklearn.feature_selection import mutual_info_classif
 
-WEATHER_FEATURES = [
-    'win100_spd', 't2', 'rhu', 'd2', 'sp', 'tp', 'ssrd', 'tcc', 'u100', 'v100', 'sf'
-]
+# ==========================================
+# 0. Environment & Database Initialization
+# ==========================================
+sys.path.append("/data1/elec_data/library")
+from EnergyDataLoader.energydataloader import EnergyDataLoader
+from EnergySQL.energysql import EnergySQL
 
-def get_weather_data(start_time: str, end_time: str, NN: int = 1) -> pd.DataFrame:
-    return (
-        # your weather features
-        # 
-    )
+ed = EnergyDataLoader('shaanxi')
+esql = EnergySQL("shaanxi", "Shaanxi_Weather_s3")
 
+# ==========================================
+# 1. Data Acquisition Module
+# ==========================================
+def get_orderbook_data(start_time, end_time):
+    base_dir = "/data1/elec_data/sqldata/shaanxi/Shaanxi_OrderBook_s1"
+    dfs = [pd.read_parquet(os.path.join(root, fn)) 
+           for d in sorted(os.listdir(base_dir)) if os.path.isdir(os.path.join(base_dir, d, "T2"))
+           for root, _, files in os.walk(os.path.join(base_dir, d, "T2")) 
+           for fn in files if fn.endswith(".parquet")]
+    
+    if not dfs: return pd.DataFrame()
+    trade_his = pd.concat(dfs, ignore_index=False, sort=False)
 
-def get_orderbook_data(start_time: str, end_time: str) -> pd.DataFrame:
-    """
-    oderbook data return deal price
-    """
+    def _extract_level(x, is_first=True):
+        if isinstance(x, str): 
+            try:
+                x = eval(x)
+            except Exception:
+                return np.nan, np.nan
+                
+        if isinstance(x, (list, tuple)) and len(x) > 0:
+            if is_first:
+                return float(x[0][0]), float(x[0][1])
+            else:
+                return float(x[-1][0]), float(x[-1][1])
+        return np.nan, np.nan
+
+    # Extract order book prices and calculate the mid-price. 
+    # Using .tolist() avoids pandas ValueError caused by index misalignment during assignment.
+    trade_his[["bid_price", "bid_amount"]] = trade_his["bids"].apply(lambda x: _extract_level(x, True)).tolist()
+    trade_his[["ask_price", "ask_amount"]] = trade_his["asks"].apply(lambda x: _extract_level(x, False)).tolist()
+    
+    trade_his["bid_price"] = (trade_his["bid_price"] + trade_his["ask_price"]) / 2
 
     return trade_his.loc[start_time:end_time]
 
-
-def get_rt_data(start_time: str, end_time: str) -> pd.DataFrame:
-
-    price_data = ed.pull(['rt'], start=start_time, end=end_time)
-    price_data.index = pd.to_datetime(price_data.index)
-    return price_data.loc[start_time:end_time]
-
-
-def prepare_train_data(start_date: str, end_date: str) -> pd.DataFrame:
- 
+def prepare_train_data(start_date, end_date):
     trade_his = get_orderbook_data(start_date, end_date)
-    rt_real = get_rt_data(start_date, end_date)
-
-    trade_cols = ["bid_price", "bid_amount", "ask_price", "ask_amount"]
+    rt_real = ed.pull(['da', 'rt'], start=start_date, end=end_date).rename_axis('time')
+    
+    # Align order book and real-time prices to calculate the price spread.
+    # Spread = bid_price - real_time_price. The sign indicates arbitrage direction.
     common_idx = trade_his.index.intersection(rt_real.index)
+    aligned = trade_his.loc[common_idx, ["bid_price"]].join(rt_real.loc[common_idx, ["rt"]], how="inner")
+    
+    aligned['hour'] = aligned.index.hour
+    aligned['prc_diff'] = aligned['bid_price'] - aligned['rt']
+    aligned['prc_diff_sign'] = np.sign(aligned['prc_diff'])    
+    return aligned.dropna()
 
-    aligned = (
-        trade_his.loc[common_idx, trade_cols]
-        .join(rt_real.loc[common_idx, ["rt"]].rename(columns={"rt": "real_rt"}), how="inner")
-        .sort_index()
-    )
-    aligned["hour"] = aligned.index.hour
-    aligned["prc_diff_t2"] = aligned["bid_price"] - aligned["real_rt"]
-    aligned["prc_diff_sign_t2"] = np.sign(aligned["prc_diff_t2"])
-    return aligned
-
-def _anova_f_2class(x: pd.Series, y: pd.Series):
-    """
-    one-way ANOVA F stats, eta² 
-   
-    """
-    x0, x1 = x[y == -1].dropna(), x[y == 1].dropna()
-    n0, n1 = len(x0), len(x1)
-    if n0 < 2 or n1 < 2:
-        return np.nan, np.nan
-
-    m0, m1 = x0.mean(), x1.mean()
-    m = (n0 * m0 + n1 * m1) / (n0 + n1)
-    ss_between = n0 * (m0 - m) ** 2 + n1 * (m1 - m) ** 2
-    ss_within = (n0 - 1) * x0.var(ddof=1) + (n1 - 1) * x1.var(ddof=1)
-
-    if ss_within <= 0 or (n0 + n1 - 2) <= 0:
-        return np.nan, np.nan
-
-    F = (ss_between / 1) / (ss_within / (n0 + n1 - 2))
-    eta2 = ss_between / (ss_between + ss_within)
-    return float(F), float(eta2)
-
-
-def var_importance_by_hour(df: pd.DataFrame, features: list) -> pd.DataFrame:
-  
-    df = df[features + ["prc_diff_sign_t2"]].copy()
-    df = df.dropna(subset=["prc_diff_sign_t2"])
-    df = df[df["prc_diff_sign_t2"] != 0].copy()
-    df["prc_diff_sign_t2"] = df["prc_diff_sign_t2"].astype(int)
-    df["hour"] = df.index.hour
-
+# ==========================================
+# 2. Feature Engineering: Mutual Information (MI) Weights
+# ==========================================
+def var_importance_mi_by_hour(hist_df, features):
+    # Filter out samples with missing values or zero price spread to ensure valid classification targets.
+    df0 = hist_df.dropna(subset=['prc_diff_sign'] + features).copy()
+    df0 = df0[df0['prc_diff_sign'] != 0]
     rows = []
+    
     for h in range(24):
-        d = df[df["hour"] == h].dropna(subset=features).copy()
-        if d.empty:
-            continue
+        d = df0[df0["hour"] == h]
+        if d.empty: continue
 
-        # hourly z-score standardise
         X = d[features].astype(float)
-        Xz = ((X - X.mean()) / X.std(ddof=0).replace(0, np.nan)).dropna()
-        y_h = d.loc[Xz.index, "prc_diff_sign_t2"]
+        # Standardize features (Z-score normalization). 
+        # Math Reason: MI relies on k-Nearest Neighbors (KNN) for density estimation. 
+        # Features must be scale-invariant so variables with larger absolute magnitudes do not dominate the distance metric.
+        Xz = ((X - X.mean()) / X.std(ddof=0).replace(0, np.nan)).fillna(0)
+        y_h = d['prc_diff_sign'].astype(int)
 
-        if (y_h == 1).sum() < 2 or (y_h == -1).sum() < 2:
+        # Minimum sample check for statistical validity.
+        if (y_h == 1).sum() < 2 or (y_h == -1).sum() < 2: 
             continue
 
-        for f in features:
-            F, eta2 = _anova_f_2class(Xz[f], y_h)
-            rows.append({
-                "hour": h, "feature": f, "F": F, "eta2": eta2,
-                "n_pos": int((y_h == 1).sum()),
-                "n_neg": int((y_h == -1).sum()),
-            })
+        # Calculate Mutual Information scores. 
+        # Math Reason: discrete_features=False treats weather data as continuous variables. 
+        # Unlike ANOVA, MI captures non-linear dependencies (e.g., U-shaped relationships) between weather and price spreads.
+        mi_scores = mutual_info_classif(Xz, y_h, discrete_features=False, random_state=42)
+        
+        for f, score in zip(features, mi_scores):
+            rows.append({"hour": h, "feature": f, "weight": score})
 
-    return (
-        pd.DataFrame(rows)
-        .dropna(subset=["F", "eta2"])
-        .rename(columns={"eta2": "variance_explained(eta2)"})
-    )
+    res_df = pd.DataFrame(rows)
+    
+    # Apply a minimal baseline weight (1e-4) to prevent division-by-zero errors 
+    # during normalization if all MI scores in a given hour happen to be zero.
+    if not res_df.empty:
+        res_df['weight'] = res_df['weight'].clip(lower=1e-4)
+        
+    return res_df
 
-
-def _get_hour_weights(var_importance: pd.DataFrame, features: list, hour: int) -> np.ndarray:
-
-    vh = var_importance[var_importance["hour"] == hour]
-    if vh.empty:
-        return np.ones(len(features)) / len(features)
-
-    w = (
-        vh.set_index("feature")["variance_explained(eta2)"]
-        .reindex(features)
-        .fillna(0.0)
-    )
-    total = w.sum()
-    return (w / total).values if total > 0 else np.ones(len(features)) / len(features)
-
-
-def _weighted_euclidean(X: np.ndarray, v: np.ndarray, weights: np.ndarray) -> np.ndarray:
-    """
-    加权欧氏距离：sqrt( sum( w_i * (x_i - v_i)^2 ) )
-    X: (n_samples, n_features), v: (1, n_features), weights: (n_features,)
-    """
-    diff = X - v  # (n_samples, n_features)
-    return np.sqrt((diff ** 2 * weights).sum(axis=1))
-
-
-def _map_prob_to_position(buy_prob: float, sell_prob: float,
-                          n_sample: int, min_samples: int,
-                          n_pos: int, n_neg: int) -> float:
-    """
-    Continuous Position Mapping:
-      - Base signal: buy_prob - sell_prob, range [-1, 1]
-      - Sample size confidence scaling: Position size scales down as the sample size decreases.
-      - Class imbalance penalty: Reduces confidence when the ratio of positive to negative samples is severely skewed.
-    Returns the position coefficient: positive = buy, negative = sell, 0 = no action.
-    """
-    # siample number confidence adjustment
-    sample_conf = min(1.0, n_sample / max(min_samples * 2, 20))
-
-    # class balance confidence（ps and neg ratio > 4:1 penalty）
-    total = n_pos + n_neg
-    if total > 0:
-        balance_ratio = min(n_pos, n_neg) / total
-        balance_conf = min(1.0, balance_ratio / 0.2)  
-    else:
-        balance_conf = 0.0
-
-    q_raw = buy_prob - sell_prob  # [-1, 1]
-    return round(q_raw * sample_conf * balance_conf, 3)
-
-
-def strategy_N(
-    lookback: int,
-    date: str,
-    tn: int,
-    features: list = None,
-    min_samples: int = 5,
-    threshold: float = 1.0,
-) -> pd.DataFrame:
-    """
-    Strategy for predicting the direction of real-time electricity prices based on similar weather days.
-
-    Parameters
-    ----------
-    lookback  : Number of historical lookback days
-    date      : Backtesting base date (format YYYYMMDD)
-    tn        : Number of days ahead for prediction (1=tomorrow, 2=day after tomorrow)
-    features  : List of meteorological features used
-    min_samples: Minimum number of similar samples per hour
-    threshold : Similarity threshold coefficient (larger value means a wider neighbourhood)
-
-    Returns
-    -------
-    DataFrame, with target day timestamps as the index, containing the following columns:
-      hour, n_sample, buy_prob, sell_prob, position, n_pos, n_neg, balance_ratio
-    """
-    if features is None:
-        features = WEATHER_FEATURES
-
+# ==========================================
+# 3. Core Strategy Logic
+# ==========================================
+def strategy_NN3(lookback: int, date: str, tn: int, z_threshold: float = 0.8, min_samples: int = 5):
+    
+    features = ['win100_spd', 't2', 'rhu', 'd2', 'sf', 'sp', 'tp', 'ssrd', 'u100', 'v100', 'tcc']
     end_date = pd.to_datetime(date)
     target_date = end_date + pd.Timedelta(days=int(tn))
     start_date = end_date - pd.Timedelta(days=int(lookback))
 
-    # ── 1. get weather ──
-    w_hist = get_weather_data(start_date.strftime("%Y%m%d"), end_date.strftime("%Y%m%d"), NN=1)
-    w_tgt = get_weather_data(target_date.strftime("%Y%m%d"), target_date.strftime("%Y%m%d"), NN=tn)
+    # Fetch weather data and apply Z-score standardization.
+    # We use historical mean and standard deviation to transform the target data 
+    # to maintain distribution alignment (avoiding data leakage).
+    w_hist = esql.select(features, start=start_date.strftime("%Y%m%d"), end=end_date.strftime("%Y%m%d"), NN=1).groupby("datetime").mean().dropna()
+    w_tgt = esql.select(features, start=target_date.strftime("%Y%m%d"), end=target_date.strftime("%Y%m%d"), NN=tn).groupby("datetime").mean().dropna()
+    
+    w_mu, w_sigma = w_hist.mean(), w_hist.std().replace(0, np.nan)
+    w_hist = ((w_hist - w_mu) / w_sigma).fillna(0)
+    w_tgt = ((w_tgt - w_mu) / w_sigma).fillna(0)
 
-    w_hist = w_hist.dropna(subset=features)
-    w_tgt = w_tgt.dropna(subset=features)
-
-    # ── 2. standardise──
-    w_mu = w_hist[features].mean()
-    w_sigma = w_hist[features].std().replace(0, np.nan)
-    w_hist[features] = ((w_hist[features] - w_mu) / w_sigma).fillna(0)
-    w_tgt[features] = ((w_tgt[features] - w_mu) / w_sigma).fillna(0)
-
-    # ── 3. historical price──
+    # Fetch historical price and order book data, then merge.
     prc_hist = prepare_train_data(start_date.strftime("%Y%m%d"), end_date.strftime("%Y%m%d"))
-
-    # ── 4. merge weather and price──
     hist = prc_hist.join(w_hist, how="inner")
-    if hist.empty:
-        print("[WARN] content ")
-        return pd.DataFrame()
+    if hist.empty: return pd.DataFrame()
 
-    # ── 5. ANOVA ──
-    var_importance = var_importance_by_hour(hist, features)
-
-    # ── 6. predict  ──
+    # Get dynamic feature weights based on Mutual Information.
+    var_importance = var_importance_mi_by_hour(hist, features)
     rows = []
+
     for ts, xz in w_tgt.iterrows():
         h = ts.hour
-        hist_hour_idx = hist.index[hist.index.hour == h]
+        hist_hour = hist[hist.index.hour == h]
+        
+        # Extract and normalize weights so they sum to 1.
+        vh = var_importance[var_importance["hour"] == h]
+        _w = vh.set_index("feature")["weight"].reindex(features).fillna(1e-4)
+        _w = _w / _w.sum() 
+        
+        # Calculate Weighted Euclidean Distance.
+        # Math Reason: We multiply the difference array by sqrt(weights) before applying np.linalg.norm.
+        # Because the L2 norm squares the components, squaring sqrt(w) results in sum(w_i * (x_i - y_i)^2).
+        X_hist_arr = hist_hour[features].values
+        v_arr = xz[features].values.reshape(1, -1)
+        w_arr = np.sqrt(_w.values).reshape(1, -1) 
+        dists = np.linalg.norm((X_hist_arr - v_arr) * w_arr, axis=1)
 
-        if len(hist_hour_idx) < min_samples:
+        # Core logic: Use absolute Z-score distance threshold.
+        # Math Reason: dist <= z_threshold (e.g., 1.5) strictly guarantees that the selected historical 
+        # matches have an average feature deviation of less than 1.5 standard deviations from the target weather.
+        sim_indices = hist_hour.index[dists <= z_threshold]
+        sim = hist.loc[sim_indices]
+        
+        # Extreme Weather Safeguard: 
+        # If the number of matching days is mathematically insignificant (< min_samples), 
+        # we refuse to trade (output 0) rather than forcing predictions on noisy/irrelevant data.
+        if len(sim) < min_samples:
             rows.append({
-                "ts": ts, "hour": h, "n_sample": 0,
-                "buy_prob": 0.0, "sell_prob": 0.0, "position": 0.0,
-                "n_pos": 0, "n_neg": 0, "balance_ratio": 0.0,
+                "ts": ts, 
+                "n_sample": len(sim), 
+                "buy_prob_neg": 0.0, 
+                "sell_prob_pos": 0.0, 
+                "Q_n2": 0.0, 
+                "hour": h
             })
             continue
-
-        # ── 6a.  ANOVA hourly──
-        weights = _get_hour_weights(var_importance, features, h)
-
-        # ── 6b. Eucleadian distance ──
-        X_hist_z = w_hist.loc[hist_hour_idx].values
-        v = xz[features].values.reshape(1, -1)
-        dists = _weighted_euclidean(X_hist_z, v, weights)
-
-        # ── 6c. similar sample ──
-        thr = np.min(dists) + threshold * np.std(dists)
-        sim_mask = dists <= thr
-        sim_indices = hist_hour_idx[sim_mask]
-        sim = hist.loc[sim_indices]
-        n = len(sim)
-
-        if n > 3:
-            # print similar sample
-            sim_dist = pd.Series(dists[sim_mask], index=sim_indices).sort_values()
-            top5_days = sim_dist.index[:5].normalize().strftime("%Y-%m-%d").unique()
-            print(f"[{ts:%Y-%m-%d %H}:00] top-5 similar days: {', '.join(top5_days)}")
-
-            n_pos = int((sim["prc_diff_sign_t2"] == 1).sum())
-            n_neg = int((sim["prc_diff_sign_t2"] == -1).sum())
-            buy_prob = float((sim["prc_diff_t2"] < 0).mean())   # bid < rt → buy
-            sell_prob = float((sim["prc_diff_t2"] > 0).mean())  # bid > rt → sell
-            balance_ratio = min(n_pos, n_neg) / max(n_pos + n_neg, 1)
-        else:
-            buy_prob = sell_prob = 0.0
-            n_pos = n_neg = 0
-            balance_ratio = 0.0
-
-        position = _map_prob_to_position(buy_prob, sell_prob, n, min_samples, n_pos, n_neg)
+        sim = sim.sort_index()
+        
+        # Apply Time-Decay Weighting to the similar samples.
+        # Math Reason: np.exp(np.linspace(-3, 0, n_sim)) generates an exponentially increasing weight curve.
+        # More recent historical samples are given higher weights, acknowledging market regime shifts 
+        # and baseline expectation changes over time.
+        n_sim = len(sim)
+        weights = np.exp(np.linspace(-3, 0, n_sim))
+        weights /= weights.sum()
+        
+        # Calculate weighted probabilities for negative and positive spreads.
+        prob_neg = float(np.sum((sim['prc_diff'] < 0) * weights))
+        prob_pos = float(np.sum((sim['prc_diff'] > 0) * weights))
+        
+        # Asymmetric Signal Mapping for Imbalanced Classes.
+        # Math Reason: Negative spreads are rare in electricity markets. Therefore, a 50% probability 
+        # of a negative spread in similar historical regimes is highly significant. We lower the buy 
+        # threshold for rare events, but demand high confidence (>70%) to short standard positive spreads.
+        q = 0.0
+        if prob_neg >= 0.5:  
+            q = 1.0
+        elif prob_pos > 0.7: 
+            q = -1.0
 
         rows.append({
-            "ts": ts, "hour": h, "n_sample": n,
-            "buy_prob": round(buy_prob, 4),
-            "sell_prob": round(sell_prob, 4),
-            "position": position,
-            "n_pos": n_pos,
-            "n_neg": n_neg,
-            "balance_ratio": round(balance_ratio, 4),
+            "ts": ts, 
+            "n_sample": len(sim), 
+            "buy_prob_neg": prob_neg, 
+            "sell_prob_pos": prob_pos, 
+            "Q_n2": q, 
+            "hour": h
         })
 
     return pd.DataFrame(rows).set_index("ts")
 
-
-# ─────────────────────────────────────────────
-# 入口
-# ─────────────────────────────────────────────
-
-def main(pred_date: str) -> pd.DataFrame:
-    """
-    pred_date : YYYYMMDD
-    """
-    return strategy_N(lookback=30, date=pred_date, tn=2, threshold=5.0)
-
+# ==========================================
+# 4. Main Function & Execution Entry
+# ==========================================
+def main(pred_date: str):
+    # lookback=40: Use past 40 days for historical context.
+    # z_threshold=1.5: Tolerate up to a 1.5 standard deviation divergence in weighted weather similarity.
+    # min_samples=3: Require at least 3 matching historical days to generate a signal.
+    return strategy_NN3(lookback=40, date=pred_date, tn=2, z_threshold=1.5, min_samples=3)
 
 if __name__ == "__main__":
-    date_range = pd.date_range(start="2026-04-01", end="2026-04-16", freq="D")
+    final_signal = pd.DataFrame()  
+    
+    # Define target prediction dates
+    date_range = pd.date_range(start="2026-04-17", end="2026-04-17", freq='D')
 
-    results = []
     for single_date in date_range:
-        date_str = single_date.strftime("%Y%m%d")
-        print(f"\n{'='*40}")
-        print(f"Running prediction for base date: {date_str}")
-        pred = main(date_str)
+        pred = main(single_date.strftime("%Y%m%d"))
         if not pred.empty:
-            results.append(pred)
-        print(pred.to_string())
+            print(f"\nPredictions for {single_date.strftime('%Y-%m-%d')}:")
+            final_signal = pd.concat([final_signal, pred])
 
-    if results:
-        final_signal = pd.concat(results)
-        print("\n" + "="*40)
-        print("Final aggregated predictions:")
-        print(final_signal.to_string())
+    if not final_signal.empty:
+        print("\n=== Final aggregated predictions ===")
+        print(final_signal)
+        
+        print("\n=== Strong BUY Signals (Negative Spread Expected) ===")
+        # Filter and display only high-conviction long/negative spread buying opportunities
+        buy_signals = final_signal[final_signal['Q_n2'] == 1.0]
+        if not buy_signals.empty:
+            print(buy_signals)
+        else:
+            print("No strong buy signals found for this period.")
