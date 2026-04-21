@@ -9,8 +9,8 @@ from sklearn.feature_selection import mutual_info_classif
 # 0. Environment & Database Initialization
 # ==========================================
 sys.path.append("/")
-from EnergyDataLoader.energydataloader import EnergyDataLoader
-from EnergySQL.energysql import EnergySQL
+import EnergyDataLoader
+import EnergySQL
 
 ed = EnergyDataLoader('location')
 esql = EnergySQL("location", "location_Weather")
