@@ -26,7 +26,13 @@ $$
 
 The motivation is that electricity markets are nonlinear, regime-dependent, and sensitive not only to forecast levels but also to **forecast revisions**, i.e. to the path by which information about future weather evolves. This naturally suggests a local, nonparametric, and distribution-oriented approach.
 
----
+
+This framework maps the prediction problem into local conditional inference. Historical observations are filtered through a regime-aware similarity geometry, then used to estimate the conditional distribution of spread under the current information state.
+<br>
+<div align="center">
+  <img width="907" height="318" alt="image" src="https://github.com/user-attachments/assets/7fa3620f-ccef-4f04-8e6d-33bd671f602e" />
+</div>
+
 
 ## 1. Motivation
 
@@ -69,9 +75,8 @@ X_i \approx X_t
 \mathcal{L}(Y_i \mid X_i) \approx \mathcal{L}(Y_t \mid X_t).
 $$
 
-That is, sufficiently similar states should induce sufficiently similar conditional response distributions. This motivates estimating the response law at time $t$ by using a local neighborhood of historical observations around $X_t$.
+That is, sufficiently similar states should induce sufficiently similar conditional response distributions. This motivates estimating the response law at time $t$ by using a local neighbourhood of historical observations around $X_t$.
 
----
 
 ## 2. State Representation
 
@@ -98,7 +103,6 @@ The decomposition is as follows:
 
 This decomposition reflects an important modelling hypothesis: the market reacts not only to the weather state itself, but also to the **dynamic information structure** through which that state is revealed.
 
----
 
 ## 3. Local Conditional Distribution Estimation
 
@@ -111,6 +115,15 @@ $$
 $$
 
 From this estimated local law, we derive several quantities of interest.
+
+The goal is not merely to retrieve geometrically close points, but to construct a neighbourhood whose empirical response distribution approximates the conditional law of the target point.
+
+<br>
+<div align="center">
+  <img width="1072" height="356" alt="image" src="https://github.com/user-attachments/assets/7611f8d2-fc00-4d33-b151-9fe45e74d640" />
+</div>
+
+
 
 ### 3.1 Local negative-spread probability
 
@@ -146,7 +159,6 @@ $$
 
 This point of view is essential. The problem is not merely one of “finding similar historical cases”; it is a problem of constructing a local sample whose empirical law is informative about the current conditional response distribution.
 
----
 
 ## 4. Similarity Geometry
 
@@ -192,6 +204,13 @@ This is especially relevant when features such as temperature, dew point, humidi
 
 The local neighbourhood definition is the main regularisation device in the estimator. It controls the usual bias-variance tradeoff in nonparametric statistics.
 
+A fixed radius leads to unstable sample size across heterogeneous-density regions; top-k stabilises sample size but may enlarge the neighbourhood excessively; a hybrid rule balances geometric locality and statistical reliability.
+
+<div align="center">
+  <img width="1288" height="356" alt="image" src="https://github.com/user-attachments/assets/8705aa0e-aeea-4229-8b66-413ae90a641b" />
+</div>
+
+
 ### 5.1 Fixed-radius neighborhood
 
 One can define neighbours by
@@ -220,9 +239,15 @@ The statistical motivation is straightforward:
 
 Thus, the neighbourhood rule should be interpreted not as a heuristic implementation choice, but as part of the estimator’s regularisation structure.
 
----
 
 ## 6. Bayesian Smoothing: Beta-Binomial Shrinkage
+
+Raw local frequency is highly unstable when the local neighbourhood is small. A Beta-Binomial posterior mean regularises local event probability by shrinking it toward the global base rate, with shrinkage strength determined by effective sample size.
+
+<div align="center">
+  <img width="609" height="387" alt="image" src="https://github.com/user-attachments/assets/44ef0631-075a-4895-b465-6fa856f6903f" />
+</div>
+
 
 ### 6.1 Why raw local frequency is unstable
 
@@ -278,9 +303,8 @@ $$
 
 This quantity is smaller when the local mass is concentrated on only a few observations. In the weighted setting, $n_{\text{eff}}$ replaces the raw count $n$ in the shrinkage logic.
 
-This is one of the key statistical improvements over the original formulation: local probabilities are no longer treated as raw empirical frequencies, but as regularized posterior estimates.
+This is one of the key statistical improvements over the original formulation: local probabilities are no longer treated as raw empirical frequencies, but as regularised posterior estimates.
 
----
 
 ## 7. Time Decay and Local Nonstationarity
 
@@ -313,7 +337,6 @@ This introduces a local-stationarity perspective:
 
 From a stochastic-process viewpoint, this means that the conditional response law is not fixed globally in time, but varies slowly, so that recency itself carries statistical value.
 
----
 
 ## 8. Regime Conditioning
 
@@ -334,7 +357,6 @@ Here $R$ may denote:
 
 This motivates restricting the candidate neighbourhood to regime-consistent subsets before local estimation. Statistically, this reduces mixture bias and makes the local empirical distribution more homogeneous.
 
----
 
 ## 9. Why Forecast Revisions Matter
 
@@ -360,7 +382,6 @@ Hence, the relevant state variable is not only the current forecast level, but a
 
 Mathematically, this reduces omitted-variable bias in the state representation and improves local homogeneity in the conditional law of the response.
 
----
 
 ## 10. From Similarity Search to Local Conditional Inference
 
@@ -446,6 +467,13 @@ Improvement:
 
 - whitened Mahalanobis distance.
 
+In correlated feature spaces, Euclidean distance overweights redundant directions. Mahalanobis distance accounts for covariance structure and yields neighbourhoods that are more meaningful for local conditional inference.
+
+<div align="center">
+  <img width="1000" height="426" alt="image" src="https://github.com/user-attachments/assets/ddddc81c-2067-4c74-9c7a-2320f09db2b6" />
+</div>
+
+
 ### 12.4 Forecast revision dynamics are added to the state space
 
 Original issue:
@@ -477,7 +505,6 @@ Improvement:
 
 - evaluate neighbourhoods by response concentration, purity, variance reduction, and calibration.
 
----
 
 ## 13. Connection to Probability, Statistics, Stochastic Processes, and Optimisation
 
@@ -515,7 +542,7 @@ Although the estimator is primarily nonparametric, optimisation enters through:
 - local neighbourhood structure,
 - manifold-like clustering of weather states.
 
----
+
 
 ## 14. Why This Framework Is Research-Relevant
 
@@ -533,7 +560,12 @@ Instead of fitting a purely black-box predictor, the method explicitly construct
 
 This makes it well-suited for research contexts in which interpretability, local reasoning, and probabilistic structure are as important as predictive performance.
 
----
+The market may react not only to forecast levels but also to how those forecasts are revised over time. Revision features encode the path of information updates and enrich the state representation beyond static weather levels.
+
+<div align="center">
+  <img width="928" height="424" alt="image" src="https://github.com/user-attachments/assets/155ca137-a94b-4e6d-bb0b-fb9abac05a94" />
+</div>
+
 
 ## 15. Open Research Directions
 
@@ -554,7 +586,7 @@ Several mathematically interesting directions remain open:
 5. **Hybrid local-global modeling**  
    Combine this local conditional framework with global learners such as Random Forests or gradient-boosted trees.
 
----
+
 
 ## Conclusion
 
