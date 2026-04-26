@@ -8,18 +8,17 @@ from sklearn.feature_selection import mutual_info_classif
 # ==========================================
 # 0. Environment & Database Initialization
 # ==========================================
-sys.path.append("/")
-import EnergyDataLoader
-import EnergySQL
+# sys.path.append("/")
+# import DataLoader
 
-ed = EnergyDataLoader('location')
-esql = EnergySQL("location", "location_Weather")
+# ed = DataLoader('location')
+# esql = Energy("location", "location_Weather")
 
 # ==========================================
 # 1. Data Acquisition Module
 # ==========================================
 def get_orderbook_data(start_time, end_time):
-    base_dir = "/data1/elec_data/sqldata/..."
+    base_dir = "/data1/..."
     dfs = [pd.read_parquet(os.path.join(root, fn)) 
            for d in sorted(os.listdir(base_dir)) if os.path.isdir(os.path.join(base_dir, d, "T2"))
            for root, _, files in os.walk(os.path.join(base_dir, d, "T2")) 
