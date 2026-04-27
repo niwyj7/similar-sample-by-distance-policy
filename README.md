@@ -52,6 +52,7 @@ $$
 
 for some link function $g$. Such a formulation is often too restrictive for weather-sensitive electricity markets for several reasons:
 
+- better **interprebility** compared to black-box learning models，
 - the effect of temperature, humidity, wind, cloud cover, and radiation is nonlinear,
 - the same weather level may have different implications across hours, seasons, or load regimes,
 - market response may depend more strongly on **forecast updates** than on forecast levels themselves,
@@ -122,7 +123,6 @@ The goal is not merely to retrieve geometrically close points, but to construct 
 <div align="center">
   <img width="1072" height="356" alt="image" src="https://github.com/user-attachments/assets/7611f8d2-fc00-4d33-b151-9fe45e74d640" />
 </div>
-
 
 
 ### 3.1 Local negative-spread probability
@@ -198,7 +198,6 @@ This metric is equivalent to Euclidean distance in a whitened coordinate system.
 
 This is especially relevant when features such as temperature, dew point, humidity, wind components, and wind speed are strongly dependent.
 
----
 
 ## 5. Neighbour Selection as Regularisation
 
@@ -399,7 +398,6 @@ This means that a neighbourhood should be judged not only by distance in feature
 
 This shift from geometric similarity to local conditional inference is the main methodological idea of the project.
 
----
 
 ## 11. Decision Layer
 
@@ -422,7 +420,6 @@ This separates the framework into two layers:
 
 This separation is mathematically important. A good estimator of local probability is not the same object as an optimal decision rule. The latter depends on asymmetric costs, signal sparsity, and risk preferences.
 
----
 
 ## 12. Improvements over the Original Statistical Formulation
 
@@ -506,7 +503,7 @@ Improvement:
 - evaluate neighbourhoods by response concentration, purity, variance reduction, and calibration.
 
 
-## 13. Connection to Probability, Statistics, Stochastic Processes, and Optimisation
+## 13. Connection to Mathematical Areas
 
 This framework sits at the intersection of several mathematical areas.
 
