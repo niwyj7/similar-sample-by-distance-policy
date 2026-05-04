@@ -507,38 +507,13 @@ Improvement:
 
 This framework sits at the intersection of several mathematical areas.
 
-### 13.1 Probability and Statistics
+- Probability and Statistics
 
-- conditional law estimation,
-- empirical process approximation,
-- Bayesian shrinkage,
-- local nonparametric inference,
-- calibration,
-- uncertainty quantification.
+- Stochastic Processes
 
-### 13.2 Stochastic Processes
+- Optimisation
 
-- local stationarity,
-- temporal drift in the response mechanism,
-- forecast revision as a pathwise information process.
-
-### 13.3 Optimisation
-
-Although the estimator is primarily nonparametric, optimisation enters through:
-
-- metric design,
-- feature weighting,
-- neighbourhood hyperparameter selection,
-- walk-forward model selection,
-- bias-variance tradeoff control.
-
-### 13.4 Geometric Data Analysis
-
-- whitening,
-- covariance-adjusted geometry,
-- local neighbourhood structure,
-- manifold-like clustering of weather states.
-
+- Geometric Data Analysis
 
 
 ## 14. Why This Framework Is Research-Relevant
