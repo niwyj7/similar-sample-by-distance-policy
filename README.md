@@ -1,5 +1,29 @@
 # Local Conditional Distribution Estimation for Weather-Driven Spread Prediction
+Overall Pipeline
+```mermaid
+flowchart LR
+    A["Config Layer
+    feature config
+    distance method
+    neighbor rule
+    hyperparameters"] --> B["Retrieval Validation
+    Check whether selected neighbours
+    are truly similar in sign/spread behaviour"]
 
+    B --> C["Walk-Forward Inference
+    on each test timestamp
+    retrieve similar historical timestamps"]
+
+    C --> D["Local neighbour evidence
+    plus hourly prior
+    => posterior probability"]
+
+    D --> E["Evaluation Layer
+    hard threshold metrics
+    ranking metrics
+    stability across windows"]
+
+```
 ## Abstract
 
 This project develops a local probabilistic framework for short-horizon spread prediction in electricity markets under weather uncertainty. Rather than modelling the task as a generic binary classification problem, the method is formulated as a problem of **local conditional distribution estimation**. The central object of interest is not merely the sign of the future spread, but the local law of the spread conditional on the current weather state, weather trend, forecast revision path, and market context.
