@@ -1,5 +1,5 @@
 # Local Conditional Distribution Estimation for Weather-Driven Spread Prediction
-Overall Pipeline
+### Overall Pipeline
 ```mermaid
 flowchart LR
     A["Config Layer
@@ -24,6 +24,8 @@ flowchart LR
     stability across windows"]
 
 ```
+
+
 ## Abstract
 
 This project develops a local probabilistic framework for short-horizon spread prediction in electricity markets under weather uncertainty. Rather than modelling the task as a generic binary classification problem, the method is formulated as a problem of **local conditional distribution estimation**. The central object of interest is not merely the sign of the future spread, but the local law of the spread conditional on the current weather state, weather trend, forecast revision path, and market context.
@@ -56,6 +58,66 @@ This framework maps the prediction problem into local conditional inference. His
 <div align="center">
   <img width="907" height="318" alt="image" src="https://github.com/user-attachments/assets/7fa3620f-ccef-4f04-8e6d-33bd671f602e" />
 </div>
+
+## Configuration
+
+The pipeline is controlled by a small set of model, retrieval, prior, and evaluation configs.
+
+#### 1. Feature Configuration
+
+| Key | Description | Typical Values |
+|---|---|---|
+| `feature_set_name` | Feature block used for similarity retrieval | `level`, `weather_core`, `snapshot_level`, `snapshot_revision`, `snapshot_lag`, `snapshot_all`, `weather_plus_snapshot`, `all_plus_snapshot` |
+| `active_hours` | Hours where the strategy is allowed to trigger signals | `HIGH_NEG_HOURS` or a manual hour list |
+
+#### 2. Retrieval Configuration
+
+| Key | Description | Typical Values |
+|---|---|---|
+| `weight_method` | Feature weighting scheme | `equal`, `mi`, `logistic` |
+| `distance_method` | Distance metric in normalized feature space | `weighted_euclidean`, `mahalanobis` |
+| `select_method` | Neighbor selection rule | `topk`, `adaptive_radius`, `hybrid` |
+| `topk` | Maximum number of nearest neighbors | `10`, `15`, `20` |
+| `radius_q` | Distance quantile cutoff for radius-based selection | `0.10`, `0.15`, `0.20` |
+| `min_samples` | Minimum number of neighbors required | `5` |
+| `max_samples` | Upper bound for adaptive / hybrid selection | `20`, `30`, `40` |
+
+#### 3. Time / Training Configuration
+
+| Key | Description | Typical Values |
+|---|---|---|
+| `train_lookback_days` | Rolling historical window used for training | `40`, `50` |
+| `test_start` | Start of evaluation period | e.g. `2026-04-01` |
+| `test_end` | End of evaluation period | e.g. `2026-04-28` |
+| `hour_only` | Restrict candidate retrieval to the same hour-of-day | `True` |
+| `same_month` | Optional month filter for candidates | `False` |
+| `same_weekend_flag` | Optional weekend / weekday consistency filter | `False` |
+
+#### 4. Prior / Posterior Configuration
+
+| Key | Description | Typical Values |
+|---|---|---|
+| `prior_strength` | Shrinkage strength toward hourly prior | `2.0`, `3.0`, `5.0`, `8.0` |
+| `time_decay_half_life_days` | Recency decay half-life for neighbor weighting | `7`, `14`, `21` |
+
+#### 5. Signal Configuration
+
+#### Hard-threshold mode
+
+| Key | Description | Typical Values |
+|---|---|---|
+| `buy_excess_th` | Minimum posterior uplift over hourly prior | `0.01`, `0.02`, `0.04` |
+| `buy_lift_th` | Minimum posterior / prior ratio | `1.02`, `1.05`, `1.10` |
+| `conf_th` | Minimum confidence threshold | `0.03`, `0.05`, `0.10` |
+| `sell_prob_th` | Sell trigger threshold for positive-spread probability | `0.55`, `0.60`, `0.72` |
+
+#### Ranking mode
+
+| Key | Description | Typical Values |
+|---|---|---|
+| `rank_score` | Continuous ranking score used instead of hard thresholds | `prob_neg_excess * confidence` |
+| `fractions` | Top-ranked fractions used for evaluation | `0.05`, `0.10`, `0.15`, `0.20`, `0.30` |
+
 
 
 ## 1. Motivation
@@ -561,26 +623,6 @@ The market may react not only to forecast levels but also to how those forecasts
 <div align="center">
   <img width="928" height="424" alt="image" src="https://github.com/user-attachments/assets/155ca137-a94b-4e6d-bb0b-fb9abac05a94" />
 </div>
-
-
-## 15. Open Research Directions
-
-Several mathematically interesting directions remain open:
-
-1. **Metric learning**  
-   Learn the similarity geometry directly from response coherence rather than hand-crafted feature weights.
-
-2. **Local conditional density estimation**  
-   Move beyond conditional means and binary-event probabilities toward full conditional density estimation.
-
-3. **Latent regime discovery**  
-   Replace manually defined regimes with statistically learned latent states.
-
-4. **Conformal or distribution-free uncertainty**  
-   Attach finite-sample-valid uncertainty bounds to the local conditional predictions.
-
-5. **Hybrid local-global modeling**  
-   Combine this local conditional framework with global learners such as Random Forests or gradient-boosted trees.
 
 
 
